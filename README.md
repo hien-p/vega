@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sosodex
 
-## Getting Started
+Hackathon entry for **Build Your One-Person On-Chain Finance Business with SoSoValue**
+([Akindo Wave Hack](https://app.akindo.io/wave-hacks/JBEQXgN4Zi2jA3wA?tab=overview)).
 
-First, run the development server:
+## Stack
+
+- Next.js 16 (App Router) + TypeScript + Tailwind v4
+- wagmi v2 + viem v2 + RainbowKit v2 + TanStack Query
+- shadcn/ui (Radix) components
+- SoSoValue REST API, proxied server-side so the API key never touches the client
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
+cp .env.example .env.local
+# fill in SOSOVALUE_API_KEY and NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Var                                    | Where                                                                                            |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `SOSOVALUE_API_KEY`                    | Server-only. Request at https://sosovalue.com/developer. Beta plan = 20 calls/min.               |
+| `SOSOVALUE_API_BASE`                   | Optional override. Defaults to `https://openapi.sosovalue.com` — verify against the latest docs. |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | https://cloud.walletconnect.com                                                                  |
 
-## Learn More
+## Layout
 
-To learn more about Next.js, take a look at the following resources:
+```
+src/
+  app/
+    api/sosovalue/        ← server proxies for SoSoValue endpoints
+    layout.tsx            ← wraps children in <Providers>
+    providers.tsx         ← Wagmi + Query + RainbowKit
+    page.tsx              ← starter dashboard
+  components/
+    connect-wallet.tsx    ← RainbowKit ConnectButton
+    ui/                   ← shadcn components
+  lib/
+    sosovalue.ts          ← typed client + error class
+    wagmi.ts              ← chains + RainbowKit config
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## SoSoValue API notes
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Docs: https://sosovalue.gitbook.io/soso-value-api-doc
+- The auth header name and exact endpoint paths in `src/lib/sosovalue.ts` are starting
+  guesses — confirm against the docs once your API key is provisioned and adjust.
+- Always call SoSoValue from a server route handler. Never expose the key to the
+  browser bundle.
