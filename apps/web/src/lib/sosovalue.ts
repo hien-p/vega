@@ -1,5 +1,12 @@
+/**
+ * SoSoValue REST client (server-side only).
+ * Docs: https://sosovalue.gitbook.io/soso-value-api-doc
+ *
+ * Auth: x-soso-api-key header.
+ * Base: https://openapi.sosovalue.com/openapi/v1
+ */
 const BASE_URL =
-  process.env.SOSOVALUE_API_BASE ?? "https://openapi.sosovalue.com";
+  process.env.SOSOVALUE_API_BASE ?? "https://openapi.sosovalue.com/openapi/v1";
 
 type FetchOpts = {
   query?: Record<string, string | number | undefined>;
@@ -22,7 +29,7 @@ function requireKey(): string {
     throw new SoSoValueError(
       500,
       null,
-      "SOSOVALUE_API_KEY is not set. Add it to .env.local — see README.",
+      "SOSOVALUE_API_KEY is not set. Add it to .env.local.",
     );
   }
   return key;
@@ -66,10 +73,27 @@ function safeJson(text: string): unknown {
   }
 }
 
+type EtfQuery = { symbol?: string; countryCode?: string };
+
 export const sosovalue = {
-  /** Featured news feed for a currency, e.g. BTC, ETH. */
-  featuredNews: (currency: string) =>
-    sosoFetch(`/api/v1/news/featured`, { query: { currency } }),
-  /** Spot ETF flow / metrics aggregate. */
-  etfOverview: () => sosoFetch(`/api/v1/etf/overview`),
+  /** Featured news feed. pageSize in [20,100]. */
+  featuredNews: (opts: { pageNum?: number; pageSize?: number; language?: string } = {}) =>
+    sosoFetch(`/news/featured`, {
+      query: {
+        pageNum: opts.pageNum ?? 1,
+        pageSize: opts.pageSize ?? 20,
+        language: opts.language,
+      },
+    }),
+  /** ETF aggregate daily history (net inflow, AUM, etc.) for a market. */
+  etfSummaryHistory: ({ symbol = "BTC", countryCode = "US" }: EtfQuery = {}) =>
+    sosoFetch(`/etfs/summary-history`, {
+      query: { symbol, country_code: countryCode },
+    }),
+  /** List of ETFs for a market. */
+  etfs: ({ symbol = "BTC", countryCode = "US" }: EtfQuery = {}) =>
+    sosoFetch(`/etfs`, { query: { symbol, country_code: countryCode } }),
+  /** Market snapshot for one ETF ticker. */
+  etfSnapshot: (ticker: string) =>
+    sosoFetch(`/etfs/${encodeURIComponent(ticker)}/market-snapshot`),
 };
