@@ -5,7 +5,7 @@ comes from, how it gets transformed into a strategy, and how that strategy
 hits the SoDEX orderbook on ValueChain.
 
 > Live demo wiring up all four blue boxes below:
-> **https://vega-web.phanhoangvinhhien.workers.dev**
+> **https://app.vega-fi.workers.dev**
 
 ---
 
