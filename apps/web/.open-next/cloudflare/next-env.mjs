@@ -1,0 +1,3 @@
+export const production = {"REACTBITS_LICENSE_KEY":"RBPU-4082A803-695F-47D1-B58C-EE5DB0D55A56"};
+export const development = {"REACTBITS_LICENSE_KEY":"RBPU-4082A803-695F-47D1-B58C-EE5DB0D55A56"};
+export const test = {};

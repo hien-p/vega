@@ -1,6 +1,9 @@
 import { ImageResponse } from 'next/og';
 
-export const runtime = 'edge';
+// OpenNext + Cloudflare Workers handles node runtime via nodejs_compat;
+// the edge-only declaration broke OpenNext's bundler since icon-as-edge
+// must live in its own function in OpenNext's model.
+export const runtime = 'nodejs';
 export const size = { width: 32, height: 32 };
 export const contentType = 'image/png';
 
