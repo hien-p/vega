@@ -83,6 +83,15 @@ type FetchState = "idle" | "loading";
 type ComposerState = "idle" | "creating" | "sending";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+// In the static deploy the Vega backend isn't reachable from the browser
+// (no localhost in production, no public worker for the copilot yet).
+// We detect that and short-circuit all fetches so the page renders in a
+// clean demo state instead of flashing "Failed to fetch" on every visit.
+const COPILOT_BACKEND_DISABLED =
+  typeof window !== "undefined" &&
+  (API_BASE_URL.startsWith("http://localhost") ||
+    API_BASE_URL.startsWith("http://127.") ||
+    !API_BASE_URL.startsWith("http"));
 const QUICK_PROMPTS = [
   {
     title: "What are my active bots doing right now?",
@@ -217,6 +226,14 @@ export function CopilotPage() {
 
   const loadConversations = useCallback(async () => {
     if (!authenticated) {
+      return;
+    }
+
+    // Static deploy fallback: backend isn't reachable. Render empty demo state
+    // without flashing a red "Failed to fetch" toast.
+    if (COPILOT_BACKEND_DISABLED) {
+      setConversations([]);
+      setHistoryState("idle");
       return;
     }
 

@@ -53,8 +53,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Link href="/" className="flex items-center gap-2.5 group pl-2">
           <VegaLogo className="w-7 h-7 text-neutral-50 group-hover:rotate-12 transition-transform duration-300" />
           <div className="flex items-baseline font-black tracking-tighter text-xl uppercase mb-[2px]">
-            <span className="text-neutral-50">Soso</span>
-            <span className="text-[#dce85d] ml-[1px]">dex</span>
+            <span className="text-neutral-50">Ve</span>
+            <span className="text-[#dce85d] ml-[1px]">ga</span>
           </div>
         </Link>
         <button
