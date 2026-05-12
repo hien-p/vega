@@ -25,7 +25,20 @@ const SUPPRESSED_RPCS = [
   "https://rpc.ankr.com/eth",
 ];
 
-function stubBodyForUrl(url: string): unknown {
+function stubBodyForUrl(url: string, method = "GET"): unknown {
+  // POST /api/bots — create a bot draft, returns {id}
+  if (method === "POST" && /\/api\/bots\/?(\?|$)/.test(url))
+    return { id: "demo-bot-" + Date.now() };
+  // PATCH /api/bots/:id — update an existing draft
+  if (method === "PATCH" && /\/api\/bots\/[^/]+/.test(url))
+    return { id: url.split("/").pop()?.split("?")[0] ?? "demo-bot" };
+  // POST /api/bots/:id/deploy — start the runtime
+  if (method === "POST" && /\/deploy(\?|$)/.test(url))
+    return { status: "active", runtime_id: "demo-runtime-" + Date.now() };
+  // POST /api/builder/validate — strategy validation
+  if (method === "POST" && url.includes("/builder/validate"))
+    return { valid: true, errors: [], warnings: [] };
+
   // Marketplace overview expects {discover, featured, creators}
   if (url.includes("/marketplace/overview") || url.includes("/public-bots"))
     return { discover: [], featured: [], creators: [] };
@@ -103,9 +116,29 @@ function stubBodyForUrl(url: string): unknown {
         "Demo mode — AI Copilot wires to Anthropic Claude / OpenAI with SoSoValue + SoDEX tool-calling in Wave 2. For Wave 1 use the Visual tab to drag blocks from the palette onto the canvas.",
     };
 
-  // Copy trading
+  // Copy trading dashboard — full shape required: follows, positions, readiness,
+  // summary metric fields, activity, discover, baskets_summary. The component
+  // calls .map / iterates over multiple fields unconditionally.
   if (url.includes("/copy/dashboard"))
-    return { mirrors: [], clones: [], summary: {} };
+    return {
+      follows: [],
+      positions: [],
+      activity: [],
+      discover: [],
+      baskets_summary: { count: 0, total_open_notional_usd: 0, total_pnl_usd: 0 },
+      summary: {
+        active_follows: 0,
+        open_positions: 0,
+        copied_open_notional_usd: 0,
+        copied_unrealized_pnl_usd: 0,
+        copied_realized_pnl_usd_24h: 0,
+      },
+      readiness: {
+        can_copy: false,
+        authorization_status: "demo",
+        blockers: ["Demo mode — Wave 2 wires copy execution"],
+      },
+    };
   if (url.includes("/copy/portfolios"))
     return { portfolios: [], summary: {} };
 
@@ -131,8 +164,9 @@ if (typeof window !== "undefined") {
             : input.url;
 
       if (DISABLED_PREFIXES.some((p) => url.startsWith(p))) {
+        const method = (init?.method ?? "GET").toUpperCase();
         return Promise.resolve(
-          new Response(JSON.stringify(stubBodyForUrl(url)), {
+          new Response(JSON.stringify(stubBodyForUrl(url, method)), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           }),
