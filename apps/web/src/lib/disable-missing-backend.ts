@@ -15,6 +15,16 @@ const DISABLED_PREFIXES = [
   "http://localhost:8001",
 ];
 
+// wagmi's default public RPCs for each chain we register (mainnet, base, etc.)
+// have restrictive CORS that floods the console. The reads themselves are
+// optional/non-critical — wagmi tolerates failures — so we short-circuit
+// with an empty JSON-RPC success response.
+const SUPPRESSED_RPCS = [
+  "https://eth.merkle.io",
+  "https://cloudflare-eth.com",
+  "https://rpc.ankr.com/eth",
+];
+
 function stubBodyForUrl(url: string): unknown {
   // Marketplace overview expects {discover, featured, creators}
   if (url.includes("/marketplace/overview") || url.includes("/public-bots"))
@@ -76,6 +86,19 @@ function stubBodyForUrl(url: string): unknown {
   if (url.includes("/builder/markets")) return [];
   if (url.includes("/builder/validate")) return { errors: [], warnings: [] };
 
+  // Builder AI chat — friendly demo-mode response. Real Anthropic / OpenAI
+  // tool-calling wiring is Wave 2. Return a `failed` poll result whose
+  // errorDetail reads like a helpful note, not a scary error.
+  if (url.includes("/builder/ai-chat/jobs") && url.endsWith("/jobs"))
+    return { id: "demo-job-" + Date.now() };
+  if (url.includes("/builder/ai-chat/jobs/"))
+    return {
+      id: url.split("/").pop(),
+      status: "failed",
+      errorDetail:
+        "Demo mode — AI Copilot wires to Anthropic Claude / OpenAI with SoSoValue + SoDEX tool-calling in Wave 2. For Wave 1 use the Visual tab to drag blocks from the palette onto the canvas.",
+    };
+
   // Copy trading
   if (url.includes("/copy/dashboard"))
     return { mirrors: [], clones: [], summary: {} };
@@ -109,6 +132,17 @@ if (typeof window !== "undefined") {
             status: 200,
             headers: { "Content-Type": "application/json" },
           }),
+        );
+      }
+
+      // wagmi public RPC pings — return a benign empty JSON-RPC reply.
+      // Saves 100+ red CORS errors in the console without breaking wagmi.
+      if (SUPPRESSED_RPCS.some((p) => url.startsWith(p))) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
         );
       }
 

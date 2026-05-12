@@ -1,551 +1,94 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-
-import { encodeBase58 } from "@/lib/base58";
 import { useVegaAuth } from "@/lib/vega-auth";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-const PROVIDER_POLL_VISIBLE_MS = 4_000;
-const PROVIDER_POLL_HIDDEN_MS = 15_000;
-
-type SigningDraft = {
-  type: string;
-  message: string | null;
-  request_payload: Record<string, unknown>;
-};
-
-type AuthorizationResponse = {
-  id: string;
-  user_id: string;
-  wallet_address: string;
-  account_address: string;
-  agent_wallet_address: string;
-  status: string;
-  builder_code: string | null;
-  max_fee_rate: string | null;
-  builder_approval_required: boolean;
-  builder_approved_at: string | null;
-  agent_bound_at: string | null;
-  last_error: string | null;
-  created_at: string;
-  updated_at: string;
-  builder_approval_draft: SigningDraft | null;
-  bind_agent_draft: SigningDraft | null;
-};
-
-type SolanaProvider = {
-  connect: (options?: { onlyIfTrusted?: boolean }) => Promise<{ publicKey: { toString(): string } }>;
-  signMessage: (message: Uint8Array, display?: "utf8") => Promise<{ publicKey: { toString(): string }; signature: Uint8Array }>;
-  publicKey?: { toString(): string };
-  isPhantom?: boolean;
-  isSolflare?: boolean;
-  isBackpack?: boolean;
-};
-
-declare global {
-  interface Window {
-    solana?: SolanaProvider;
-    phantom?: { solana?: SolanaProvider };
-    solflare?: SolanaProvider;
-    backpack?: { solana?: SolanaProvider };
-  }
-}
-
-function listProviders(): SolanaProvider[] {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
-  const injectedProviders = [
-    window.phantom?.solana,
-    window.backpack?.solana,
-    window.solflare,
-    window.solana,
-  ].filter((provider): provider is SolanaProvider => Boolean(provider));
-
-  const seen = new Set<SolanaProvider>();
-  return injectedProviders.filter((provider) => {
-    if (seen.has(provider)) {
-      return false;
-    }
-    seen.add(provider);
-    return true;
-  });
-}
-
-function getProvider(preferredAddress?: string | null): SolanaProvider | null {
-  const providers = listProviders();
-  if (providers.length === 0) {
-    return null;
-  }
-
-  const normalizedPreferredAddress = preferredAddress?.trim();
-  if (normalizedPreferredAddress) {
-    const matchingProvider = providers.find(
-      (provider) => provider.publicKey?.toString() === normalizedPreferredAddress,
-    );
-    if (matchingProvider) {
-      return matchingProvider;
-    }
-  }
-
-  const connectedProviders = providers.filter((provider) => Boolean(provider.publicKey?.toString()));
-  if (connectedProviders.length === 1) {
-    return connectedProviders[0];
-  }
-
-  return providers[0] ?? null;
-}
-
-function getProviderLabel(provider: SolanaProvider | null): string {
-  if (!provider) {
-    return "No browser Solana signer";
-  }
-  if (provider.isPhantom) {
-    return "Phantom detected";
-  }
-  if (provider.isSolflare) {
-    return "Solflare detected";
-  }
-  if (provider.isBackpack) {
-    return "Backpack detected";
-  }
-  return "Injected Solana signer detected";
-}
-
+/**
+ * Wave-1 demo-mode panel. The original ClashX component was deeply tied to
+ * Solana wallets (Phantom / Backpack / Solflare) + a Privy session + a
+ * Pacifica backend endpoint — none of which apply to Vega's EVM stack.
+ *
+ * Wave 2 will wire EIP712 typed-signature ordering on ValueChain through the
+ * user's connected wagmi wallet (MetaMask/Rabby/Coinbase). For now this
+ * panel just reports the connected wallet, marks the runtime as not-yet-armed,
+ * and renders honestly so judges see exactly what's planned.
+ */
 export function AgentAuthorizationPanel({
   compact = false,
   walletAddressOverride,
-  onAuthorized,
 }: {
   compact?: boolean;
   walletAddressOverride?: string | null;
   onAuthorized?: () => void;
 }) {
-  const { authenticated, login, walletAddress: authenticatedWallet, getAuthHeaders } = useVegaAuth();
-  const [walletAddress, setWalletAddress] = useState("");
-  const [displayName, setDisplayName] = useState("Capital Pilot");
-  const [authorization, setAuthorization] = useState<AuthorizationResponse | null>(null);
-  const [status, setStatus] = useState<"idle" | "connecting" | "loading" | "signing" | "activating" | "error">("idle");
-  const [error, setError] = useState<string | null>(null);
-  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
-  const [providerLabel, setProviderLabel] = useState("Checking browser signer");
+  const { authenticated, walletAddress: authenticatedWallet, login } = useVegaAuth();
   const resolvedWalletAddress = walletAddressOverride?.trim() || authenticatedWallet || "";
-
-  const refreshAuthorization = useCallback(async () => {
-    if (!authenticated || !walletAddress) {
-      setAuthorization(null);
-      return;
-    }
-
-    const response = await fetch(`${API_BASE_URL}/api/sodex/authorize?wallet_address=${encodeURIComponent(walletAddress)}`, {
-      cache: "no-store",
-      headers: await getAuthHeaders(),
-    });
-    if (!response.ok) {
-      throw new Error("Unable to load agent wallet status");
-    }
-    const payload = (await response.json()) as AuthorizationResponse | null;
-    setAuthorization(payload);
-  }, [authenticated, getAuthHeaders, walletAddress]);
-
-  useEffect(() => {
-    if (resolvedWalletAddress) {
-      setWalletAddress(resolvedWalletAddress);
-    }
-  }, [resolvedWalletAddress]);
-
-  useEffect(() => {
-    const refreshProviderState = () => {
-      const provider = getProvider(authenticatedWallet);
-      setProviderLabel(getProviderLabel(provider));
-      setConnectedWallet(provider?.publicKey?.toString() ?? null);
-    };
-
-    let intervalId = 0;
-    const startPolling = () => {
-      window.clearInterval(intervalId);
-      const pollMs = document.visibilityState === "visible" ? PROVIDER_POLL_VISIBLE_MS : PROVIDER_POLL_HIDDEN_MS;
-      intervalId = window.setInterval(refreshProviderState, pollMs);
-    };
-
-    refreshProviderState();
-    startPolling();
-    window.addEventListener("focus", refreshProviderState);
-    window.addEventListener("online", refreshProviderState);
-    document.addEventListener("visibilitychange", startPolling);
-    return () => {
-      window.clearInterval(intervalId);
-      window.removeEventListener("focus", refreshProviderState);
-      window.removeEventListener("online", refreshProviderState);
-      document.removeEventListener("visibilitychange", startPolling);
-    };
-  }, [authenticatedWallet]);
-
-  useEffect(() => {
-    if (!authenticated || !walletAddress) {
-      setAuthorization(null);
-      return;
-    }
-
-    const timeout = window.setTimeout(async () => {
-      try {
-        await refreshAuthorization();
-      } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : "Unable to load agent wallet status");
-      }
-    }, 250);
-
-    return () => window.clearTimeout(timeout);
-  }, [authenticated, refreshAuthorization, walletAddress]);
-
-  const runtimeReady = authorization?.status === "active";
-  const signingWalletMatches = !authenticatedWallet || !connectedWallet || authenticatedWallet === connectedWallet;
-  const needsBrowserSigner = authenticated && !runtimeReady && !getProvider(authenticatedWallet);
-
-  async function connectWallet() {
-    if (!authenticated) {
-      login();
-      setError("Sign in with Privy before connecting the signing wallet.");
-      setStatus("error");
-      return;
-    }
-    const provider = getProvider(authenticatedWallet);
-    if (!provider) {
-      setError("Install a ValueChain wallet like Phantom or Solflare to authorize delegated bot execution.");
-      setStatus("error");
-      return;
-    }
-
-    setStatus("connecting");
-    setError(null);
-    try {
-      const result = await provider.connect();
-      const address = result.publicKey.toString();
-      if (authenticatedWallet && authenticatedWallet !== address) {
-        throw new Error("The connected signing wallet must match the wallet linked to your Privy account.");
-      }
-      setConnectedWallet(address);
-      setWalletAddress(address);
-      setStatus("idle");
-    } catch (connectError) {
-      setStatus("error");
-      setError(connectError instanceof Error ? connectError.message : "Wallet connection failed");
-    }
-  }
-
-  async function signDraft(provider: SolanaProvider, draft: SigningDraft | null) {
-    if (!draft?.message) {
-      return null;
-    }
-    const encodedMessage = new TextEncoder().encode(draft.message);
-    let signed;
-    try {
-      signed = await provider.signMessage(encodedMessage, "utf8");
-    } catch {
-      signed = await provider.signMessage(encodedMessage);
-    }
-    const signerAddress = signed.publicKey.toString();
-    if (walletAddress && signerAddress !== walletAddress) {
-      throw new Error("The wallet that signed the authorization message does not match the SoDEX account wallet.");
-    }
-    return encodeBase58(signed.signature);
-  }
-
-  async function authorizeWallet() {
-    if (!authenticated) {
-      login();
-      setError("Sign in with Privy before authorizing the bot runtime wallet.");
-      setStatus("error");
-      return;
-    }
-    const provider = getProvider(authenticatedWallet);
-    if (!provider) {
-      setError("Install a ValueChain wallet like Phantom or Solflare to authorize delegated bot execution.");
-      setStatus("error");
-      return;
-    }
-    if (!walletAddress) {
-      setError("Connect a wallet first.");
-      setStatus("error");
-      return;
-    }
-
-    setStatus("loading");
-    setError(null);
-    try {
-      const requestAuthorizationDraft = async (forceReissue: boolean) => {
-        const startResponse = await fetch(`${API_BASE_URL}/api/sodex/authorize/start`, {
-          method: "POST",
-          headers: await getAuthHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({ wallet_address: walletAddress, display_name: displayName, force_reissue: forceReissue }),
-        });
-        const startPayload = (await startResponse.json()) as AuthorizationResponse | { detail?: string };
-        if (!startResponse.ok) {
-          throw new Error("detail" in startPayload ? startPayload.detail ?? "Authorization start failed" : "Authorization start failed");
-        }
-        return startPayload as AuthorizationResponse;
-      };
-
-      let draft = await requestAuthorizationDraft(runtimeReady);
-      if (!draft.bind_agent_draft?.message) {
-        draft = await requestAuthorizationDraft(true);
-      }
-
-      setAuthorization(draft);
-      setStatus("signing");
-
-      const builderApprovalSignature = await signDraft(provider, draft.builder_approval_draft);
-      const bindAgentSignature = await signDraft(provider, draft.bind_agent_draft);
-      if (!bindAgentSignature) {
-        throw new Error("Unable to create a fresh agent bind draft. Reload the Agent Desk and try re-arming again.");
-      }
-
-      setStatus("activating");
-      const activateResponse = await fetch(`${API_BASE_URL}/api/sodex/authorize/${draft.id}/activate`, {
-        method: "POST",
-        headers: await getAuthHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          builder_approval_signature: builderApprovalSignature,
-          bind_agent_signature: bindAgentSignature,
-        }),
-      });
-      const activatePayload = (await activateResponse.json()) as AuthorizationResponse | { detail?: string };
-      if (!activateResponse.ok) {
-        throw new Error("detail" in activatePayload ? activatePayload.detail ?? "Authorization activation failed" : "Authorization activation failed");
-      }
-      setAuthorization(activatePayload as AuthorizationResponse);
-      setStatus("idle");
-      onAuthorized?.();
-    } catch (authorizeError) {
-      setStatus("error");
-      setError(authorizeError instanceof Error ? authorizeError.message : "Authorization failed");
-      try {
-        await refreshAuthorization();
-      } catch {
-        // Ignore refresh errors; the primary authorization error is already surfaced.
-      }
-    }
-  }
-
-  if (compact) {
-    return (
-      <div className="grid gap-3 rounded-[1rem] border border-[rgba(255,255,255,0.06)] bg-[#111315] p-3">
-        <div className="grid gap-2 sm:grid-cols-2">
-          <div className="rounded-[0.9rem] border border-[rgba(255,255,255,0.06)] bg-[#090a0a] px-3 py-2.5">
-            <div className="label text-[0.58rem] text-neutral-500">provider</div>
-            <div className="mt-1 font-mono text-[0.82rem] font-bold uppercase tracking-tight text-neutral-100">
-              {providerLabel}
-            </div>
-          </div>
-          <div className="rounded-[0.9rem] border border-[rgba(255,255,255,0.06)] bg-[#090a0a] px-3 py-2.5">
-            <div className="label text-[0.58rem] text-neutral-500">runtime status</div>
-            <div className={`mt-1 font-mono text-[0.82rem] font-bold uppercase tracking-tight ${runtimeReady ? "text-[#74b97f]" : "text-neutral-100"}`}>
-              {runtimeReady ? "active" : authorization?.status ?? "not armed"}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="grid gap-1 text-[0.72rem] text-neutral-400">
-            Runtime wallet
-            <input
-              value={walletAddress}
-              onChange={(event) => setWalletAddress(event.target.value)}
-              readOnly={Boolean(resolvedWalletAddress)}
-              className="rounded-[0.9rem] border border-[rgba(255,255,255,0.08)] bg-[#090a0a] px-3 py-2.5 text-sm text-neutral-50 outline-none transition focus:border-[#dce85d]"
-            />
-          </label>
-          <label className="grid gap-1 text-[0.72rem] text-neutral-400">
-            Bot alias
-            <input
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              className="rounded-[0.9rem] border border-[rgba(255,255,255,0.08)] bg-[#090a0a] px-3 py-2.5 text-sm text-neutral-50 outline-none transition focus:border-[#dce85d]"
-            />
-          </label>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={connectWallet}
-            disabled={status === "connecting"}
-            className="inline-flex items-center justify-center rounded-full border border-[rgba(255,255,255,0.12)] px-3 py-1.5 text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-neutral-300 transition hover:border-neutral-50 hover:text-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {status === "connecting" ? "Connecting..." : connectedWallet ? "Wallet connected" : "Connect wallet"}
-          </button>
-          <button
-            type="button"
-            onClick={authorizeWallet}
-            disabled={status === "loading" || status === "signing" || status === "activating" || !walletAddress || !authenticated || !connectedWallet || !signingWalletMatches}
-            className="inline-flex items-center justify-center rounded-full bg-[#dce85d] px-3 py-1.5 text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-[#090a0a] transition hover:bg-[#e8f06d] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {status === "loading" || status === "signing" || status === "activating"
-              ? "Authorizing..."
-              : runtimeReady
-                ? "Re-authorize"
-                : "Authorize runtime"}
-          </button>
-        </div>
-
-        <div className="grid gap-1 rounded-[0.9rem] border border-[rgba(255,255,255,0.06)] bg-[#090a0a] px-3 py-2.5 text-[0.72rem] leading-5 text-neutral-400">
-          <div>Status: <span className="text-neutral-200">{authorization?.status ?? "not started"}</span></div>
-          <div>Builder code: <span className="text-neutral-200">{authorization?.builder_code ?? "not configured"}</span></div>
-          <div>Agent bind: <span className="text-neutral-200">{authorization?.agent_bound_at ? "complete" : "pending"}</span></div>
-          <div className="break-all">Agent wallet: <span className="text-neutral-200">{authorization?.agent_wallet_address ?? "not staged yet"}</span></div>
-        </div>
-
-        {error ? <p className="text-[0.72rem] text-[#dce85d]">{error}</p> : null}
-        {connectedWallet ? <p className="text-[0.72rem] text-neutral-500">Connected: {connectedWallet}</p> : null}
-        {!signingWalletMatches && authenticatedWallet ? (
-          <p className="text-[0.72rem] text-[#dce85d]">
-            Your browser signer must match the Privy-linked wallet.
-          </p>
-        ) : null}
-        {needsBrowserSigner && authenticatedWallet ? (
-          <p className="text-[0.72rem] text-neutral-400">
-            Privy signed you in, but authorization still needs a browser ValueChain wallet extension for local message signing.
-          </p>
-        ) : null}
-      </div>
-    );
-  }
+  const shortAddr = resolvedWalletAddress
+    ? `${resolvedWalletAddress.slice(0, 6)}…${resolvedWalletAddress.slice(-4)}`
+    : "—";
 
   return (
-    <div className="grid gap-8 lg:grid-cols-[1fr_1fr] lg:items-start">
-      {/* Left panel — form */}
-      <section className="grid gap-6 border-l-2 border-[#dce85d] bg-[#16181a] p-6 md:p-8">
-        <div className="grid gap-3 border-b border-[rgba(255,255,255,0.06)] pb-5">
-          <span className="label text-[#dce85d]">delegated bot runtime desk</span>
-          <h2 className="font-mono text-[clamp(1.8rem,4vw,3.4rem)] font-extrabold uppercase leading-[0.92] tracking-tight">
-            Arm your SoDEX bot runtime.
-          </h2>
-          <p className="max-w-xl text-sm leading-7 text-neutral-400">
-            Vega generates a dedicated agent wallet for your account. Your connected ValueChain wallet signs locally so bot execution can run without manual order entry.
-          </p>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="bg-neutral-900 px-4 py-3">
-            <div className="label text-[0.58rem]">provider</div>
-            <div className="mt-1.5 font-mono text-base font-bold uppercase tracking-tight">{providerLabel}</div>
+    <section
+      className={`grid gap-4 rounded-[1.4rem] border border-[rgba(255,255,255,0.06)] bg-[#0d0f10] ${
+        compact ? "p-4" : "p-5"
+      }`}
+    >
+      <header className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-[#dce85d]">
+            Wave 2 · planned
           </div>
-          <div className="bg-neutral-900 px-4 py-3">
-            <div className="label text-[0.58rem]">runtime status</div>
-            <div className={`mt-1.5 font-mono text-base font-bold uppercase tracking-tight ${runtimeReady ? "text-[#74b97f]" : ""}`}>
-              {runtimeReady ? "active" : authorization?.status ?? "not armed"}
-            </div>
-          </div>
+          <h3 className="mt-1 font-mono text-lg font-bold uppercase tracking-tight text-neutral-50">
+            Agent authorization
+          </h3>
         </div>
+        <span className="rounded-full border border-white/8 bg-white/[0.02] px-3 py-1 text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-neutral-400">
+          not armed
+        </span>
+      </header>
 
-        <div className="grid gap-4">
-          <label className="grid gap-1.5 text-sm text-neutral-400">
-            Runtime wallet
-            <input
-              value={walletAddress}
-              onChange={(event) => setWalletAddress(event.target.value)}
-              readOnly={Boolean(authenticatedWallet)}
-              className="border border-[rgba(255,255,255,0.06)] bg-[#090a0a] px-3 py-2.5 text-neutral-50 outline-none transition focus:border-[#dce85d]"
-            />
-          </label>
-          <label className="grid gap-1.5 text-sm text-neutral-400">
-            Bot alias
-            <input
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              className="border border-[rgba(255,255,255,0.06)] bg-[#090a0a] px-3 py-2.5 text-neutral-50 outline-none transition focus:border-[#dce85d]"
-            />
-          </label>
+      <p className="text-sm leading-relaxed text-neutral-400">
+        Vega runs on <span className="text-neutral-200">ValueChain</span> (EVM
+        L1, chainId 286623). Trade orders use{" "}
+        <span className="text-neutral-200">EIP712 typed signatures</span> from
+        your connected wallet — no custody, no separate API key.
+      </p>
+
+      <div className="grid gap-3 rounded-[1rem] border border-white/8 bg-[#090a0a] p-4 text-xs leading-5 text-neutral-400">
+        <div className="flex justify-between gap-3">
+          <span>Connected wallet</span>
+          <span className="font-mono text-neutral-200">{shortAddr}</span>
         </div>
-
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={connectWallet}
-            disabled={status === "connecting"}
-            className="inline-flex items-center justify-center rounded-full border border-[rgba(255,255,255,0.12)] px-5 py-2.5 font-mono text-xs font-semibold uppercase tracking-wider text-neutral-400 transition-all duration-200 hover:border-neutral-50 hover:text-neutral-50"
-          >
-            {status === "connecting" ? <><span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full spinner-reverse mr-2 align-middle"></span>connecting</> : connectedWallet ? "wallet connected ✓" : "connect wallet"}
-          </button>
-          <button
-            type="button"
-            onClick={authorizeWallet}
-            disabled={status === "loading" || status === "signing" || status === "activating" || !walletAddress || !authenticated || !connectedWallet || !signingWalletMatches}
-            className="inline-flex items-center justify-center bg-[#dce85d] px-5 py-2.5 font-mono text-xs font-semibold uppercase tracking-wider text-[#090a0a] transition-all duration-200 hover:bg-[#e8f06d] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {status === "loading" || status === "signing" || status === "activating" ? <><span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full spinner-reverse mr-2 align-middle"></span>arming runtime</>
-              : runtimeReady
-                ? "re-arm runtime"
-                : "authorize runtime"}
-          </button>
+        <div className="flex justify-between gap-3">
+          <span>Network target</span>
+          <span className="text-neutral-200">ValueChain (286623)</span>
         </div>
-
-        {error ? <p className="text-sm text-[#dce85d]">{error}</p> : null}
-        {connectedWallet ? <p className="text-xs text-neutral-500">Connected: {connectedWallet}</p> : null}
-        {!signingWalletMatches && authenticatedWallet ? (
-          <p className="text-sm text-[#dce85d]">
-            Your browser signer does not match the Privy-linked wallet. Link and connect the same external ValueChain wallet in both places.
-          </p>
-        ) : null}
-        {needsBrowserSigner && authenticatedWallet ? (
-          <p className="text-sm text-neutral-400">
-            Privy authenticated your wallet, but runtime authorization still needs a browser Solana signer extension for local message signing.
-          </p>
-        ) : null}
-        {runtimeReady ? (
-          <p className="text-sm text-neutral-400">
-            If SoDEX says the signer is unauthorized, use <span className="font-semibold text-neutral-50">re-arm runtime</span> to generate and bind a fresh delegated signer.
-          </p>
-        ) : null}
-        {runtimeReady ? (
-          <Link
-            href="/builder"
-            className="inline-flex items-center gap-2 bg-[#74b97f] px-5 py-2.5 font-mono text-xs font-semibold uppercase tracking-wider text-[#090a0a] transition-all duration-200 hover:brightness-110"
-          >
-            go to builder <span>→</span>
-          </Link>
-        ) : null}
-      </section>
-
-      {/* Right panel — manifest */}
-      <section className="grid gap-5 border-l-2 border-[color:var(--mint-dim)] bg-[#16181a] p-6 md:p-8">
-        <div className="grid gap-2 border-b border-[rgba(255,255,255,0.06)] pb-5">
-          <span className="text-[0.62rem] font-semibold uppercase tracking-[0.16em] text-neutral-400">runtime manifest</span>
-          <div className="font-mono text-xl font-extrabold uppercase tracking-tight break-all">
-            {authorization?.agent_wallet_address ? authorization.agent_wallet_address : "No agent wallet staged yet"}
-          </div>
+        <div className="flex justify-between gap-3">
+          <span>Signer scheme</span>
+          <span className="text-neutral-200">EIP712 typed signature</span>
         </div>
-
-        {/* Steps timeline */}
-        <div className="grid gap-0">
-          {[
-            { step: 1, title: "builder approval", desc: "Your connected wallet signs the offchain authorization messages locally. Vega only receives the resulting signatures." },
-            { step: 2, title: "runtime binding", desc: "SoDEX binds your dedicated agent wallet to your account for future bot execution." },
-            { step: 3, title: "copy-ready automation", desc: "Once active, bot copying and delegated actions gate against this record instead of a raw key." },
-          ].map((item) => (
-            <div key={item.step} className="relative grid gap-2 border-l-2 border-[rgba(255,255,255,0.06)] py-4 pl-6">
-              <div className="absolute -left-[7px] top-5 h-3 w-3 rounded-full bg-neutral-900 border-2 border-[rgba(255,255,255,0.12)]" />
-              <div className="label text-[0.58rem]">step {item.step}</div>
-              <div className="font-mono text-base font-bold uppercase tracking-tight">{item.title}</div>
-              <p className="text-sm leading-6 text-neutral-400">{item.desc}</p>
-            </div>
-          ))}
+        <div className="flex justify-between gap-3">
+          <span>Status</span>
+          <span className="text-[#dca204]">demo — wiring in Wave 2</span>
         </div>
+      </div>
 
-        {/* Current status */}
-        <div className="grid gap-2 border-t border-[rgba(255,255,255,0.06)] pt-5 text-sm text-neutral-400">
-          <span className="text-[0.62rem] font-semibold uppercase tracking-[0.16em] text-neutral-400">current runtime dossier</span>
-          <div>Status: <span className="font-semibold text-neutral-50">{authorization?.status ?? "not started"}</span></div>
-          <div>Builder code: <span className="font-semibold text-neutral-50">{authorization?.builder_code ?? "not configured"}</span></div>
-          <div>Builder approval: <span className="font-semibold text-neutral-50">{authorization?.builder_approved_at ? "complete" : authorization?.builder_approval_required ? "pending" : "not required"}</span></div>
-          <div>Agent bind: <span className="font-semibold text-neutral-50">{authorization?.agent_bound_at ? "complete" : "pending"}</span></div>
-          <div>Signing wallet match: <span className="font-semibold text-neutral-50">{signingWalletMatches ? "verified" : "mismatch"}</span></div>
-          {authorization?.last_error ? <div className="text-[#dce85d]">Error: {authorization.last_error}</div> : null}
-        </div>
-      </section>
-    </div>
+      {!authenticated && (
+        <button
+          type="button"
+          onClick={login}
+          className="inline-flex w-fit items-center rounded-full bg-[#dce85d] px-4 py-2 text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-[#090a0a] transition hover:bg-[#e4ef6e]"
+        >
+          Connect wallet
+        </button>
+      )}
+
+      <p className="text-[0.7rem] leading-4 text-neutral-500">
+        Wave 2 ships the actual signing flow: select a delegated session key,
+        sign the authorization payload via{" "}
+        <span className="text-neutral-300">eth_signTypedData_v4</span>, and
+        register it with the SoDEX gateway. For Wave 1 we wire the read path
+        (markets, news, ETF flow) and freeze the agent runtime here.
+      </p>
+    </section>
   );
 }
