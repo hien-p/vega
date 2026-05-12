@@ -20,9 +20,44 @@ function stubBodyForUrl(url: string): unknown {
   if (url.includes("/marketplace/overview") || url.includes("/public-bots"))
     return { discover: [], featured: [], creators: [] };
 
-  // Readiness / onboarding panels expect a steps array
+  // Readiness / onboarding panels expect the full SoDEXReadinessPayload shape
+  // including a `metrics` object — missing it crashes the React tree because
+  // the onboarding page reads readiness.metrics.sol_balance unconditionally.
   if (url.includes("/readiness") || url.includes("/sodex-readiness"))
-    return { steps: [], wallet_address: null };
+    return {
+      wallet_address: "",
+      ready: false,
+      blockers: ["Demo mode — backend not deployed"],
+      metrics: {
+        sol_balance: 0,
+        min_sol_balance: 0.1,
+        equity_usd: null,
+        min_equity_usd: 100,
+        agent_wallet_address: null,
+        authorization_status: "inactive",
+        builder_code: null,
+      },
+      steps: [
+        {
+          id: "funding",
+          title: "Fund testnet wallet",
+          verified: false,
+          detail: "Demo mode — wallet funding tracked in real backend.",
+        },
+        {
+          id: "app_access",
+          title: "App access",
+          verified: false,
+          detail: "Demo mode — backend not deployed.",
+        },
+        {
+          id: "agent_authorization",
+          title: "Agent authorization",
+          verified: false,
+          detail: "Demo mode — EIP712 signing wired in Wave 2.",
+        },
+      ],
+    };
 
   // Backtest bootstrap → various fields
   if (url.includes("/backtests/bootstrap"))
