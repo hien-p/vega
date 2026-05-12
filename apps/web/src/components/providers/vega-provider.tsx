@@ -1,5 +1,9 @@
 "use client";
 
+// Module-level side effect — must run before any (app) component mounts
+// to catch their first localhost backend fetch. See file for rationale.
+import "@/lib/disable-missing-backend";
+
 import { useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WagmiProvider } from "wagmi";
