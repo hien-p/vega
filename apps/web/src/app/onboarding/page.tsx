@@ -181,9 +181,11 @@ export default function OnboardingPage() {
           {currentStep === 2 && (
             <div className="grid gap-8 animate-in fade-in slide-in-from-bottom-4 duration-700 ease-out-quart">
               <div className="grid gap-3">
-                <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight">Add devnet SOL</h1>
+                <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight">Add testnet $SOSO</h1>
                 <p className="text-base text-neutral-400 leading-relaxed">
-                  We need a confirmed devnet balance before the trading interface opens.
+                  Vega trades on <span className="text-neutral-200">ValueChain</span> (EVM L1, chainId 286623).
+                  Native gas is <span className="text-neutral-200">$SOSO</span> — not SOL.
+                  We need a confirmed testnet balance before the trading interface opens.
                 </p>
               </div>
 
@@ -192,13 +194,13 @@ export default function OnboardingPage() {
                   <div>
                     <div className="text-sm text-neutral-500 mb-1 font-medium">Current Balance</div>
                     <div className="text-3xl font-semibold tracking-tight">
-                      {resolvedReadiness ? `${formatSol(resolvedReadiness.metrics.sol_balance)} SOL` : "--"}
+                      {resolvedReadiness ? `${formatSol(resolvedReadiness.metrics.sol_balance)} SOSO` : "--"}
                     </div>
                   </div>
                   <div className="text-right">
                     <div className="text-sm text-neutral-500 mb-1 font-medium">Required</div>
                     <div className="text-base font-semibold text-neutral-300">
-                      0.1 SOL
+                      0.1 SOSO
                     </div>
                   </div>
                 </div>
@@ -206,7 +208,7 @@ export default function OnboardingPage() {
                 <div className="h-px bg-white/10 w-full" />
 
                 <div className="flex items-center justify-between">
-                  <ExternalAction href="https://faucet.solana.com" label="Solana Faucet" />
+                  <ExternalAction href="https://chainlist.org/chain/286623" label="Add ValueChain to wallet" />
                   <button
                     onClick={() => void refreshReadiness()}
                     disabled={resolvedStatus === "loading"}

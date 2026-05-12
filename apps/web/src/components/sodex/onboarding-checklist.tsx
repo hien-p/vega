@@ -189,12 +189,12 @@ export function SoDEXOnboardingChecklist({
             </article>
 
             <article className="grid gap-1 rounded-[1.2rem] border border-[rgba(255,255,255,0.06)] bg-[#121416] p-4">
-              <span className="text-[0.56rem] font-semibold uppercase tracking-[0.16em] text-neutral-500">SOL on devnet</span>
+              <span className="text-[0.56rem] font-semibold uppercase tracking-[0.16em] text-neutral-500">$SOSO on ValueChain</span>
               <div className="font-mono text-xl font-bold uppercase tracking-tight text-neutral-50">
-                {resolvedReadiness ? `${formatSol(resolvedReadiness.metrics.sol_balance)} SOL` : "--"}
+                {resolvedReadiness ? `${formatSol(resolvedReadiness.metrics.sol_balance)} SOSO` : "--"}
               </div>
               <p className="text-[0.7rem] leading-4 text-neutral-500">
-                Need {resolvedReadiness ? `${formatSol(resolvedReadiness.metrics.min_sol_balance)} SOL` : "0.1 SOL"} minimum.
+                Need {resolvedReadiness ? `${formatSol(resolvedReadiness.metrics.min_sol_balance)} SOSO` : "0.1 SOSO"} minimum.
               </p>
             </article>
 
@@ -238,7 +238,7 @@ export function SoDEXOnboardingChecklist({
 
                 {step.id === "funding" ? (
                   <div className="grid gap-2 rounded-[1rem] border border-[rgba(255,255,255,0.06)] bg-[#090a0a] p-3 text-xs leading-5 text-neutral-400">
-                    <div>SOL: <span className="text-neutral-200">{resolvedReadiness ? `${formatSol(resolvedReadiness.metrics.sol_balance)} / ${formatSol(resolvedReadiness.metrics.min_sol_balance)} required` : "--"}</span></div>
+                    <div>SOSO: <span className="text-neutral-200">{resolvedReadiness ? `${formatSol(resolvedReadiness.metrics.sol_balance)} / ${formatSol(resolvedReadiness.metrics.min_sol_balance)} required` : "--"}</span></div>
                     <div>Equity: <span className="text-neutral-200">{resolvedReadiness ? `${formatMetricUsd(resolvedReadiness.metrics.equity_usd)} / ${formatUsd(resolvedReadiness.metrics.min_equity_usd)} required` : "--"}</span></div>
                     <div className="flex flex-wrap gap-2 pt-1">
                       <a

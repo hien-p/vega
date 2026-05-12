@@ -96,14 +96,23 @@ export function LiveEtfFlow({
   }, [symbol]);
 
   if (error) {
+    const isRateLimit = /429|rate limit/i.test(error);
     return (
       <div
         className={`rounded-2xl border border-[rgba(255,255,255,0.08)] bg-black/40 p-4 backdrop-blur-md ${className}`}
       >
-        <div className="text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-[#e06c6e]">
-          {symbol} ETF flow · offline
+        <div
+          className={`text-[0.62rem] font-semibold uppercase tracking-[0.18em] ${
+            isRateLimit ? "text-[#dca204]" : "text-[#e06c6e]"
+          }`}
+        >
+          {symbol} ETF flow · {isRateLimit ? "rate limited" : "offline"}
         </div>
-        <div className="mt-2 text-xs text-neutral-500">{error}</div>
+        <div className="mt-2 text-xs text-neutral-500">
+          {isRateLimit
+            ? "SoSoValue Demo tier = 20 calls/min. Retry in ~60s, or apply for higher limits via the Buildathon access form."
+            : error}
+        </div>
       </div>
     );
   }

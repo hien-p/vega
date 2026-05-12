@@ -60,11 +60,22 @@ export function LiveNewsFeed({ limit = 5 }: { limit?: number }) {
         </a>
       </header>
 
-      {error && (
-        <div className="rounded-md border border-[#e06c6e]/30 bg-[#e06c6e]/10 px-3 py-2 text-xs text-[#e06c6e]">
-          {error}
-        </div>
-      )}
+      {error && (() => {
+        const isRateLimit = /429|rate limit/i.test(error);
+        return (
+          <div
+            className={`rounded-md border px-3 py-2 text-xs ${
+              isRateLimit
+                ? "border-[#dca204]/30 bg-[#dca204]/10 text-[#dca204]"
+                : "border-[#e06c6e]/30 bg-[#e06c6e]/10 text-[#e06c6e]"
+            }`}
+          >
+            {isRateLimit
+              ? "Rate limited — SoSoValue Demo tier = 20 calls/min. Retry in ~60s."
+              : error}
+          </div>
+        );
+      })()}
 
       {!items && !error && (
         <ul className="space-y-3">
