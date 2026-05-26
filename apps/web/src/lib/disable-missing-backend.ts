@@ -149,7 +149,13 @@ function stubBodyForUrl(url: string, method = "GET"): unknown {
   return [];
 }
 
-if (typeof window !== "undefined") {
+// Opt-in via env flag so we can flip between demo (stubs) and real upstream
+// modes without redeploying. When unset, default to "1" to preserve the
+// existing Cloudflare static build behaviour. Set NEXT_PUBLIC_DEMO_MODE="0"
+// in `.env.local` to expose real errors during integration work.
+const DEMO_MODE = (process.env.NEXT_PUBLIC_DEMO_MODE ?? "1") === "1";
+
+if (DEMO_MODE && typeof window !== "undefined") {
   const win = window as Window & { __vegaFetchPatched?: boolean };
   if (!win.__vegaFetchPatched) {
     win.__vegaFetchPatched = true;
