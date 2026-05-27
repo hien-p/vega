@@ -154,14 +154,17 @@ const EXPECTED = {
   LIMIT_BUY: {
     json:
       '{"type":"batchNewOrder","params":{"accountID":1001,"orders":[{"symbolID":2,"clOrdID":"vega-fixture-001","side":"buy","type":"limit","timeInForce":"gtc","price":"2099.5","quantity":"0.05"}]}}',
+    hash: "0x5fe78dfc3c510a5acbd51ad56e9d19e4aa03e0c132b74ca85bb2c50776efea71",
   },
   MARKET_SELL: {
     json:
       '{"type":"batchNewOrder","params":{"accountID":1001,"orders":[{"symbolID":2,"clOrdID":"vega-fixture-002","side":"sell","type":"market","timeInForce":"ioc","quantity":"0.05"}]}}',
+    hash: "0x258768e7e6bf7a413356d73b38ff4fd90c3b34b21ba0ae28d3fa27ad8ecf3eb1",
   },
   BATCH: {
     json:
       '{"type":"batchNewOrder","params":{"accountID":1001,"orders":[{"symbolID":2,"clOrdID":"vega-batch-a","side":"buy","type":"limit","timeInForce":"gtc","price":"2099.0","quantity":"0.01"},{"symbolID":2,"clOrdID":"vega-batch-b","side":"sell","type":"limit","timeInForce":"post_only","price":"2101.0","quantity":"0.01"}]}}',
+    hash: "0x3ab90ab075ebf6970670fe08d2476022b823b433aed22d5d24d3bf21ff85002d",
   },
 };
 
@@ -183,6 +186,7 @@ function runCase(name, fixture, expected) {
   }
 
   assert.equal(json, expected.json, `${name}: canonical JSON mismatch`);
+  assert.equal(hash, expected.hash, `${name}: payloadHash mismatch`);
   console.log(`OK  ${name}  ${hash}`);
   return hash;
 }
@@ -196,6 +200,4 @@ runCase("market_sell ", MARKET_SELL_FIXTURE, EXPECTED.MARKET_SELL);
 runCase("batch       ", BATCH_FIXTURE, EXPECTED.BATCH);
 
 console.log();
-console.log("All canonical JSON outputs locked.");
-console.log("Cross-check the hashes printed above against the Go SDK once,");
-console.log("then encode the verified hashes here as additional assertions.");
+console.log("All canonical JSON outputs and payload hashes locked.");

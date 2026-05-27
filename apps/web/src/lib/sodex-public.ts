@@ -72,16 +72,17 @@ export type SoDEXSymbol = {
   status: string;
 };
 
-export type SoDEXCandle = [
-  openTime: number,
-  open: string,
-  high: string,
-  low: string,
-  close: string,
-  volume: string,
-  closeTime: number,
-  quoteVolume: string,
-];
+export type SoDEXCandle = {
+  /** Candle open time, unix ms. */
+  t: number;
+  /** Open, high, low, close, volume, quote volume. */
+  o: string;
+  h: string;
+  l: string;
+  c: string;
+  v: string;
+  q: string;
+};
 
 export type SoDEXAccountState = {
   user: string;
@@ -89,9 +90,20 @@ export type SoDEXAccountState = {
   aid: number;
   uid: number;
   /** Balances (compact array form from the API). */
-  B: unknown[];
+  B: SoDEXCompactBalance[];
   /** Open orders (compact array form from the API). */
-  O: unknown[];
+  O: unknown[] | null;
+};
+
+export type SoDEXCompactBalance = {
+  /** Coin ID. */
+  i: number;
+  /** Coin symbol. */
+  a: string;
+  /** Total balance. */
+  t: string;
+  /** Locked balance. */
+  l: string;
 };
 
 export type SoDEXBalance = {
@@ -131,9 +143,11 @@ export type SoDEXUserTrade = {
 export type SoDEXOrderbookLevel = [price: string, size: string];
 
 export type SoDEXOrderbook = {
+  blockTime: number;
+  blockHeight: number;
+  updateID: number;
   bids: SoDEXOrderbookLevel[];
   asks: SoDEXOrderbookLevel[];
-  timestamp: number;
 };
 
 // --- Endpoints -------------------------------------------------------------

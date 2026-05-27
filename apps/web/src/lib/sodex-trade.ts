@@ -37,15 +37,15 @@
  *
  *  • HTML escaping — Go's default `json.Marshal` HTML-escapes `<`, `>`,
  *    `&` to `<>&`. JS `JSON.stringify` does NOT.
- *    For Wave 1, restrict `clOrdID` to ASCII alphanumerics + `-_` so the
- *    issue cannot trigger. A future Go-compatible escape helper would
- *    fix the general case.
+ *    Wave 1 enforces `clOrdID` as ASCII alphanumerics + `-_` so the issue
+ *    cannot trigger. A future Go-compatible escape helper would fix the
+ *    general case.
  *
  *  • U+2028 / U+2029 — Go escapes these; modern JS does not in
  *    JSON.stringify. Same Wave 1 mitigation (ASCII clOrdID).
  *
- * The `tests/sodex-payload-hash.test.ts` fixture catches regressions in
- * field order and decimal handling against a hash captured from the Go
+ * The `scripts/sodex-payload-hash-parity.mjs` fixture catches regressions
+ * in field order and decimal handling against hashes captured from the Go
  * SDK. Run it before any real txn attempt.
  */
 
@@ -53,20 +53,19 @@ import { keccak256, type Hex, type TypedData } from "viem";
 import { signTypedData } from "wagmi/actions";
 
 import { wagmiConfig } from "./wagmi";
-import { getSpotBaseUrl } from "./sodex-public";
+import { getSpotBaseUrl, isTestnet } from "./sodex-public";
 
 // ─── Domain ──────────────────────────────────────────────────────────────
 
 const SPOT_DOMAIN_NAME = "spot";
 const ZERO_VERIFYING_CONTRACT = "0x0000000000000000000000000000000000000000" as const;
 
-/** ValueChain mainnet. Override with NEXT_PUBLIC_SODEX_CHAIN_ID for testnet. */
-const DEFAULT_CHAIN_ID = 286623;
+/** ValueChain mainnet. Testnet must be supplied explicitly by env. */
+const VALUECHAIN_MAINNET_CHAIN_ID = 286623;
+const SAFE_CL_ORD_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function getSpotDomain() {
-  const chainId = Number(
-    process.env.NEXT_PUBLIC_SODEX_CHAIN_ID ?? DEFAULT_CHAIN_ID,
-  );
+  const chainId = getConfiguredSoDEXChainId();
   return {
     name: SPOT_DOMAIN_NAME,
     version: "1",
@@ -81,6 +80,41 @@ const EXCHANGE_ACTION_TYPES = {
     { name: "nonce", type: "uint64" },
   ],
 } as const satisfies TypedData;
+
+function parseChainId(value: string | undefined, label: string): number | null {
+  if (value === undefined || value.trim() === "") return null;
+  const chainId = Number(value);
+  if (!Number.isInteger(chainId) || chainId <= 0) {
+    throw new Error(`${label} must be a positive integer chain id.`);
+  }
+  return chainId;
+}
+
+function getConfiguredSoDEXChainId(): number {
+  const explicit = parseChainId(
+    process.env.NEXT_PUBLIC_SODEX_CHAIN_ID,
+    "NEXT_PUBLIC_SODEX_CHAIN_ID",
+  );
+  if (explicit !== null) return explicit;
+
+  if (!isTestnet()) {
+    return (
+      parseChainId(process.env.NEXT_PUBLIC_VALUECHAIN_ID, "NEXT_PUBLIC_VALUECHAIN_ID") ??
+      VALUECHAIN_MAINNET_CHAIN_ID
+    );
+  }
+
+  const testnetChainId = parseChainId(
+    process.env.NEXT_PUBLIC_VALUECHAIN_TESTNET_ID,
+    "NEXT_PUBLIC_VALUECHAIN_TESTNET_ID",
+  );
+  if (testnetChainId !== null) return testnetChainId;
+
+  throw new Error(
+    "SoDEX signed writes are configured for testnet but no EIP-712 chain id is set. " +
+      "Set NEXT_PUBLIC_SODEX_CHAIN_ID or NEXT_PUBLIC_VALUECHAIN_TESTNET_ID.",
+  );
+}
 
 // ─── Action request types (mirror Go SDK struct field order) ────────────
 
@@ -119,6 +153,12 @@ export const ACTION_NAME_BATCH_NEW_ORDER = "batchNewOrder";
 // ─── Canonical JSON encoders ─────────────────────────────────────────────
 
 function canonicalBatchNewOrderItem(item: BatchNewOrderItem): Record<string, unknown> {
+  if (!SAFE_CL_ORD_ID.test(item.clOrdID)) {
+    throw new Error(
+      `Invalid clOrdID "${item.clOrdID}". Use 1-64 ASCII letters, numbers, "-" or "_".`,
+    );
+  }
+
   // Build in SDK struct field order. Trailing optional fields are dropped
   // by JSON.stringify when their value is undefined.
   const out: Record<string, unknown> = {
