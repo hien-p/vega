@@ -18,35 +18,38 @@
  * JSON canonicalization risk
  * ─────────────────────────────────────────────────────────────────────────
  * The server recomputes payloadHash by JSON-marshaling its own struct via
- * Go's `encoding/json`. Our JSON output must be byte-identical. The known
- * divergences between Go and JS JSON output, and how this module handles
- * them:
+ * Go's `encoding/json`. Our JSON output must be byte-identical. The
+ * divergences between Go and JS JSON output (all verified against the Go
+ * SDK via scripts/sodex-payload-hash-parity.mjs), and how this module
+ * handles them:
  *
  *  • Key order — Go marshals in struct field declaration order. JS
  *    `JSON.stringify` preserves object literal insertion order (ES2015+
  *    for string keys). Helpers below build params objects with keys in
  *    SDK struct order, NOT alphabetical.
  *
- *  • Decimal numbers — Go's `*decimal.Decimal` (shopspring) marshals as a
- *    JSON STRING. Price/quantity/funds must be passed as strings here
- *    (`"50000"`, not `50000`).
+ *  • Enums are INTEGERS — OrderSide/OrderType/TimeInForce are Go `int`
+ *    types with no MarshalJSON, so encoding/json emits numbers (side:1,
+ *    not "buy"). The encoder maps the friendly string union to the SDK
+ *    integer codes. This is the single biggest gotcha — a string here
+ *    silently breaks every signature.
+ *
+ *  • Decimals normalize — Go's `*decimal.Decimal` (shopspring) marshals
+ *    as a JSON STRING and the server re-marshals after unmarshaling, so
+ *    "2099.0" becomes "2099". Pass decimals as strings; the encoder
+ *    normalizes trailing zeros to match.
  *
  *  • omitempty — Go drops nil pointer fields. JSON.stringify drops
  *    `undefined` values. Pass `undefined` (not null, not "") for fields
  *    you want omitted.
  *
  *  • HTML escaping — Go's default `json.Marshal` HTML-escapes `<`, `>`,
- *    `&` to `<>&`. JS `JSON.stringify` does NOT.
- *    Wave 1 enforces `clOrdID` as ASCII alphanumerics + `-_` so the issue
- *    cannot trigger. A future Go-compatible escape helper would fix the
- *    general case.
+ *    `&`. JS `JSON.stringify` does NOT. clOrdID is pinned to ASCII
+ *    alphanumerics + `-_` so the issue cannot trigger; all other string
+ *    fields are server-controlled enums/decimals.
  *
- *  • U+2028 / U+2029 — Go escapes these; modern JS does not in
- *    JSON.stringify. Same Wave 1 mitigation (ASCII clOrdID).
- *
- * The `scripts/sodex-payload-hash-parity.mjs` fixture catches regressions
- * in field order and decimal handling against hashes captured from the Go
- * SDK. Run it before any real txn attempt.
+ * The parity script locks three reference payloadHashes captured from a
+ * `go run` against sodex-go-sdk-public. Re-run it before any real txn.
  */
 
 import { keccak256, type Hex, type TypedData } from "viem";
@@ -119,14 +122,47 @@ function getConfiguredSoDEXChainId(): number {
 // ─── Action request types (mirror Go SDK struct field order) ────────────
 
 export type SoDEXOrderSide = "buy" | "sell";
-export type SoDEXOrderType = "limit" | "market" | "stop_limit" | "stop_market";
+export type SoDEXOrderType = "limit" | "market";
 export type SoDEXTimeInForce = "gtc" | "ioc" | "fok" | "post_only";
+
+// SoDEX enums are Go `int` types with no MarshalJSON, so encoding/json
+// serializes them as NUMBERS. Verified against the Go SDK output — the
+// signed payload must carry integers here, not the human-readable
+// strings, or the server's recomputed payloadHash will not match.
+//   common/enums/order_side.go     Buy=1  Sell=2
+//   common/enums/order_type.go     Limit=1 Market=2
+//   common/enums/time_in_force.go  GTC=1  FOK=2  IOC=3  GTX(post-only)=4
+const ORDER_SIDE_CODE: Record<SoDEXOrderSide, number> = { buy: 1, sell: 2 };
+const ORDER_TYPE_CODE: Record<SoDEXOrderType, number> = { limit: 1, market: 2 };
+const TIME_IN_FORCE_CODE: Record<SoDEXTimeInForce, number> = {
+  gtc: 1,
+  fok: 2,
+  ioc: 3,
+  post_only: 4,
+};
+
+const DECIMAL_RE = /^-?\d+(\.\d+)?$/;
+
+/**
+ * Normalize a decimal string the way shopspring/decimal's String() does:
+ * strip trailing fractional zeros and a dangling decimal point. The server
+ * unmarshals price/quantity into decimal.Decimal and re-marshals before
+ * hashing, so "2099.0" becomes "2099" on its side — we must match.
+ */
+export function normalizeDecimalString(value: string): string {
+  if (!DECIMAL_RE.test(value)) {
+    throw new Error(`Invalid decimal "${value}". Expected a plain decimal number.`);
+  }
+  if (!value.includes(".")) return value;
+  return value.replace(/0+$/, "").replace(/\.$/, "");
+}
 
 /**
  * Field order must match `spot/types/batch_new_order_request.go::BatchNewOrderItem`:
  *   symbolID, clOrdID, side, type, timeInForce, price, quantity, funds.
- * price/quantity/funds use `*decimal.Decimal` with omitempty — pass as
- * decimal STRINGS or undefined to omit.
+ * Pass side/type/timeInForce as friendly strings — they are mapped to the
+ * SDK integer codes here. price/quantity/funds are `*decimal.Decimal` with
+ * omitempty — pass as decimal STRINGS or undefined to omit.
  */
 export interface BatchNewOrderItem {
   symbolID: number;
@@ -159,18 +195,19 @@ function canonicalBatchNewOrderItem(item: BatchNewOrderItem): Record<string, unk
     );
   }
 
-  // Build in SDK struct field order. Trailing optional fields are dropped
-  // by JSON.stringify when their value is undefined.
+  // Build in SDK struct field order. Enums map to integer codes; decimals
+  // normalize to shopspring's String() form. Trailing optional fields are
+  // dropped by JSON.stringify when their value is undefined.
   const out: Record<string, unknown> = {
     symbolID: item.symbolID,
     clOrdID: item.clOrdID,
-    side: item.side,
-    type: item.type,
-    timeInForce: item.timeInForce,
+    side: ORDER_SIDE_CODE[item.side],
+    type: ORDER_TYPE_CODE[item.type],
+    timeInForce: TIME_IN_FORCE_CODE[item.timeInForce],
   };
-  if (item.price !== undefined) out.price = item.price;
-  if (item.quantity !== undefined) out.quantity = item.quantity;
-  if (item.funds !== undefined) out.funds = item.funds;
+  if (item.price !== undefined) out.price = normalizeDecimalString(item.price);
+  if (item.quantity !== undefined) out.quantity = normalizeDecimalString(item.quantity);
+  if (item.funds !== undefined) out.funds = normalizeDecimalString(item.funds);
   return out;
 }
 
