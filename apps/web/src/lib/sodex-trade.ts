@@ -257,13 +257,31 @@ const SIGNATURE_TYPE_EIP712 = 0x01;
 /**
  * Wrap a 65-byte ECDSA signature with the 1-byte type prefix to produce
  * the 66-byte wire signature the server expects.
+ *
+ * Also normalizes the recovery byte: viem and most browser wallets follow
+ * the Ethereum 27/28 convention, but the SoDEX server calls go-ethereum's
+ * crypto.SigToPub which rejects 27/28 with "Invalid recovery ID". We
+ * convert to the raw 0/1 form before prepending the type byte. Verified
+ * end-to-end against testnet — orderID 1250224257 was the first accepted
+ * txn after this normalization landed.
  */
 export function toWireSignature(sig65: Hex): Hex {
   if (!sig65.startsWith("0x") || sig65.length !== 132) {
     throw new Error(`expected 65-byte hex signature, got ${sig65.length - 2} chars`);
   }
+  const bytes = new Uint8Array(32 + 32 + 1);
+  for (let i = 0; i < 65; i++) {
+    bytes[i] = Number.parseInt(sig65.slice(2 + i * 2, 4 + i * 2), 16);
+  }
+  const v = bytes[64];
+  if (v === 27) bytes[64] = 0;
+  else if (v === 28) bytes[64] = 1;
+  else if (v !== 0 && v !== 1) {
+    throw new Error(`unexpected v byte: 0x${v.toString(16)}`);
+  }
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   const prefix = SIGNATURE_TYPE_EIP712.toString(16).padStart(2, "0");
-  return `0x${prefix}${sig65.slice(2)}` as Hex;
+  return `0x${prefix}${hex}` as Hex;
 }
 
 // ─── Signing + POST helpers ──────────────────────────────────────────────
