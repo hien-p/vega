@@ -185,6 +185,26 @@ export interface BatchNewOrderRequest {
 }
 
 export const ACTION_NAME_BATCH_NEW_ORDER = "batchNewOrder";
+export const ACTION_NAME_BATCH_CANCEL_ORDER = "batchCancelOrder";
+
+/**
+ * Field order matches `spot/types/batch_cancel_order_request.go::BatchCancelOrderItem`:
+ *   symbolID, clOrdID, orderID, origClOrdID.
+ * `clOrdID` here is THIS cancel action's own id (idempotency); the order
+ * being killed is identified by `orderID` OR `origClOrdID` (one of the
+ * two must be set).
+ */
+export interface BatchCancelOrderItem {
+  symbolID: number;
+  clOrdID: string;
+  orderID?: number;
+  origClOrdID?: string;
+}
+
+export interface BatchCancelOrderRequest {
+  accountID: number;
+  cancels: BatchCancelOrderItem[];
+}
 
 // ─── Canonical JSON encoders ─────────────────────────────────────────────
 
@@ -215,6 +235,28 @@ function canonicalBatchNewOrderRequest(req: BatchNewOrderRequest): Record<string
   return {
     accountID: req.accountID,
     orders: req.orders.map(canonicalBatchNewOrderItem),
+  };
+}
+
+function canonicalBatchCancelOrderItem(item: BatchCancelOrderItem): Record<string, unknown> {
+  if (!SAFE_CL_ORD_ID.test(item.clOrdID)) {
+    throw new Error(
+      `Invalid clOrdID "${item.clOrdID}". Use 1-64 ASCII letters, numbers, "-" or "_".`,
+    );
+  }
+  if (item.orderID === undefined && item.origClOrdID === undefined) {
+    throw new Error("BatchCancelOrderItem: provide orderID or origClOrdID.");
+  }
+  const out: Record<string, unknown> = { symbolID: item.symbolID, clOrdID: item.clOrdID };
+  if (item.orderID !== undefined) out.orderID = item.orderID;
+  if (item.origClOrdID !== undefined) out.origClOrdID = item.origClOrdID;
+  return out;
+}
+
+function canonicalBatchCancelOrderRequest(req: BatchCancelOrderRequest): Record<string, unknown> {
+  return {
+    accountID: req.accountID,
+    cancels: req.cancels.map(canonicalBatchCancelOrderItem),
   };
 }
 
@@ -343,11 +385,13 @@ interface PlaceOrderResponse {
 }
 
 /**
- * POST a signed action to a SoDEX endpoint with the standard headers.
- * Throws SoDEXTradeError if the HTTP response is not 200 or the API code
- * is non-zero.
+ * Send a signed action to a SoDEX endpoint with the standard headers.
+ * Method is POST for placements, DELETE for cancels. Throws
+ * SoDEXTradeError if the HTTP response is not 200 or the API code is
+ * non-zero.
  */
-export async function postSigned(
+export async function sendSigned(
+  method: "POST" | "DELETE",
   endpointPath: string,
   signed: SignedAction,
 ): Promise<PlaceOrderResponse> {
@@ -361,7 +405,7 @@ export async function postSigned(
   };
 
   const res = await fetch(url, {
-    method: "POST",
+    method,
     headers,
     // Re-stringify the same body shape we hashed. JSON.stringify on a
     // pure object is deterministic for the inputs we control here.
@@ -383,12 +427,49 @@ export async function postSigned(
 }
 
 /**
- * Convenience: sign + submit a batch new order in one call.
+ * Sign a batch-cancel-order request. Same EIP-712 pipeline as placement —
+ * different action name and request shape; the server expects DELETE on
+ * the same /trade/orders/batch endpoint.
  */
+export async function signBatchCancelOrder(
+  req: BatchCancelOrderRequest,
+  opts: { account?: `0x${string}` } = {},
+): Promise<SignedAction> {
+  const body = canonicalBatchCancelOrderRequest(req);
+  const payloadHash = computePayloadHash(ACTION_NAME_BATCH_CANCEL_ORDER, body);
+  const nonce = nextNonce();
+  const domain = getSpotDomain();
+
+  const sig65 = await signTypedData(wagmiConfig, {
+    account: opts.account,
+    domain,
+    types: EXCHANGE_ACTION_TYPES,
+    primaryType: "ExchangeAction",
+    message: { payloadHash, nonce },
+  });
+
+  return {
+    wireSig: toWireSignature(sig65),
+    nonce,
+    body,
+    payloadHash,
+  };
+}
+
+/** Sign + submit a batch new order in one call. */
 export async function placeBatchNewOrder(
   req: BatchNewOrderRequest,
   opts: { account?: `0x${string}` } = {},
 ) {
   const signed = await signBatchNewOrder(req, opts);
-  return postSigned("/trade/orders/batch", signed);
+  return sendSigned("POST", "/trade/orders/batch", signed);
+}
+
+/** Sign + submit a batch cancel in one call. */
+export async function cancelBatchOrder(
+  req: BatchCancelOrderRequest,
+  opts: { account?: `0x${string}` } = {},
+) {
+  const signed = await signBatchCancelOrder(req, opts);
+  return sendSigned("DELETE", "/trade/orders/batch", signed);
 }

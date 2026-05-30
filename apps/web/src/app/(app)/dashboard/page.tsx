@@ -8,6 +8,7 @@ import { useVegaAuth } from "@/lib/vega-auth";
 import { LiveEtfFlow } from "@/components/sosovalue/live-etf-flow";
 import { LiveNewsFeed } from "@/components/sosovalue/live-news-feed";
 import { LiveSoDEXMarkets } from "@/components/sodex/live-markets";
+import { TestOrderPanel } from "@/components/sodex/test-order-panel";
 
 const QUICK_LINKS = [
   {
@@ -76,6 +77,10 @@ export default function DashboardRoute() {
       <section className="mb-6 grid gap-4 lg:grid-cols-2">
         <LiveSoDEXMarkets limit={6} />
         <LiveNewsFeed limit={5} />
+      </section>
+
+      <section className="mb-6">
+        <TestOrderPanel />
       </section>
 
       <section className="grid gap-4 md:grid-cols-3">
