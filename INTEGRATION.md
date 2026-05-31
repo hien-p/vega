@@ -327,9 +327,31 @@ Two scripts cover the L1 side independently of any SoDEX trading:
 Both read `SODEX_TESTNET_PRIVATE_KEY` from `apps/web/.env.local`
 (gitignored). On a fresh wallet you will see `balance: 0 SOSO` and
 the self-transfer will refuse to broadcast; that is the expected
-state because **the public testnet faucet at
-`testnet.sodex.com/faucet` only credits vUSDC inside the SoDEX
-engine — it does not drop native SOSO to L1**. Per SoSoValue
+state because **the public testnet faucet only credits vUSDC inside
+the SoDEX engine — it does not drop native SOSO to L1**.
+
+The faucet endpoint (discovered by inspecting the testnet.sodex.com
+JS bundle, not in the public SDK) is:
+
+```
+POST https://testnet.sodex.dev/faucet/api/claim   { address }
+```
+
+No signature required. Rate-limited to one claim per address per day.
+`apps/web/scripts/sodex-faucet-claim.mjs` wraps it: takes the wallet
+address (auto-resolved from `SODEX_TESTNET_PRIVATE_KEY`), POSTs the
+claim, prints the resulting L1 transaction hash, polls for the
+receipt, and reports the engine balance delta. A successful claim
+returns the operator's tx — e.g. our first run produced
+`0x1e3b48ec…cf1` at block `8545071`, gas used 97928, four Transfer /
+Approval log events from the bridge contract — and the SoDEX engine
+balance moved from 1200 to 1300 vUSDC. The next call returns
+`{"code":1,"msg":"Already claimed"}` with HTTP 403.
+
+That confirms the faucet is itself an L1 actor: the operator wallet
+pays gas and sends vUSDC through a bridge contract that credits the
+SoDEX engine. Our wallet appears nowhere on L1 in this flow — it
+just receives an off-chain credit on the engine side. Per SoSoValue
 docs, native SOSO testnet gas is earned through testnet tasks /
 points rather than handed out by a public faucet. Once a wallet
 holds any non-zero SOSO, the self-transfer script confirms the L1
