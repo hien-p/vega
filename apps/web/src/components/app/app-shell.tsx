@@ -17,29 +17,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const pathname = usePathname();
 
-  const navSections = [
+  // wave2 = route depends on a stubbed backend endpoint that has no real
+  // upstream wired yet. When NEXT_PUBLIC_DEMO_MODE=0, the route still
+  // navigates but a badge marks it as work-in-progress so demos honestly
+  // show what is shipped vs planned. /dashboard is the zero-mock vertical:
+  // it pulls real SoSoValue ETF flows + real SoDEX tickers + real news.
+  const navSections: Array<{
+    label: string;
+    items: Array<{ href: string; label: string; icon: typeof Activity; wave2?: boolean }>;
+  }> = [
     {
       label: 'Overview',
       items: [
         { href: '/dashboard', label: 'Dashboard', icon: Activity },
-        { href: '/analytics', label: 'Analytics', icon: BarChart3 },
-        { href: '/telegram', label: 'Telegram', icon: Send },
+        { href: '/analytics', label: 'Analytics', icon: BarChart3, wave2: true },
+        { href: '/telegram', label: 'Telegram', icon: Send, wave2: true },
       ]
     },
     {
       label: 'Discover',
       items: [
-        { href: '/marketplace', label: 'Marketplace', icon: Trophy },
-        { href: '/copy', label: 'Copy Trading', icon: ShoppingBag },
+        { href: '/marketplace', label: 'Marketplace', icon: Trophy, wave2: true },
+        { href: '/copy', label: 'Copy Trading', icon: ShoppingBag, wave2: true },
       ]
     },
     {
       label: 'Studio',
       items: [
-        { href: '/builder', label: 'Builder Studio', icon: Box },
-        { href: '/copilot', label: 'Copilot', icon: Bot },
-        { href: '/bots', label: 'My Bots', icon: LayoutDashboard },
-        { href: '/backtests', label: 'Backtests', icon: FlaskConical },
+        { href: '/builder', label: 'Builder Studio', icon: Box, wave2: true },
+        { href: '/copilot', label: 'Copilot', icon: Bot, wave2: true },
+        { href: '/bots', label: 'My Bots', icon: LayoutDashboard, wave2: true },
+        { href: '/backtests', label: 'Backtests', icon: FlaskConical, wave2: true },
       ]
     }
   ];
@@ -96,6 +104,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     )}
                     <Icon className={clsx("w-[18px] h-[18px] transition-colors", active ? "text-[#dce85d]" : "text-neutral-500 group-hover:text-neutral-200")} strokeWidth={active ? 2.5 : 2} />
                     <span>{item.label}</span>
+                    {item.wave2 && (
+                      <span
+                        title="Wave 2 — still uses stub data; UI is shipped but backend wiring is in progress"
+                        className="ml-auto text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-500 group-hover:text-neutral-300"
+                      >
+                        W2
+                      </span>
+                    )}
                   </Link>
                 );
               })}

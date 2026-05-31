@@ -35,15 +35,33 @@ hits the SoDEX orderbook on ValueChain.
    └──────────┘      └──────────┘     └──────────┘      └──────┬───────┘
                                                                │
                                                                ▼
-                                                    ┌────────────────────┐
-                                                    │     VALUECHAIN     │
-                                                    │  EVM L1 · 286623   │
-                                                    │  SOSO native gas   │
-                                                    └────────────────────┘
+                                                  ┌────────────────────────┐
+                                                  │  SoDEX SPOT SEQUENCER  │
+                                                  │  internal chain        │
+                                                  │  block 148M+ · 1s/blk  │
+                                                  │  every order = a tx    │
+                                                  │  visible at            │
+                                                  │  testnet.sodex.com/    │
+                                                  │  explorer              │
+                                                  └────────────┬───────────┘
+                                                               │ bridge
+                                                               │ (deposit /
+                                                               │  withdraw only)
+                                                               ▼
+                                                  ┌────────────────────────┐
+                                                  │     VALUECHAIN L1      │
+                                                  │  EVM · 286623 (main)   │
+                                                  │       · 138565 (test)  │
+                                                  │  Wallet pays SOSO gas  │
+                                                  │  only when moving      │
+                                                  │  funds across bridge.  │
+                                                  └────────────────────────┘
 ```
 
 Every arrow above is a real network call. Pieces with shipped code are
-described in §3-7 with exact endpoints.
+described in §3-7 with exact endpoints. Critically, **a placed order is
+NOT an L1 transaction** — it is a signed message that the SoDEX
+sequencer chain accepts. See §7.5 for the live evidence.
 
 ---
 
@@ -235,6 +253,109 @@ address, there is no separate signup. Connect MetaMask once and the same
 key authorizes both reads (account info) and writes (orders). This is
 the "agent-friendly" property SoSoValue advertised — Vega agents are
 just EVM addresses that hold a delegated signing key.
+
+---
+
+## 7.5. Off-chain orderbook, on-chain bridge — what's actually L1?
+
+A common misread of SoSoValue's "on-chain orderbook" framing is that
+every order becomes a ValueChain L1 transaction. It does not. Live
+testing on testnet:
+
+1. **Placed a real signed limit BUY** (orderID `1250224257`,
+   `vBTC_vUSDC` 0.0004 @ 25217, signed via wagmi-style EIP-712) and
+   **cancelled it** with a second signature. Both accepted by the
+   SoDEX engine.
+2. **`eth_getTransactionCount` for the wallet on ValueChain L1
+   testnet returned 0**, and `eth_getBalance` returned 0 SOSO. The
+   wallet has never broadcast an L1 transaction.
+3. **`eth_getLogs` for ERC20 Transfer events touching the wallet
+   returned 0 hits in either direction.** The faucet credit (1200
+   vUSDC) reached the SoDEX engine without an L1 token transfer.
+4. **The `blockHeight` field in every SoDEX response is in the
+   148M range** while ValueChain L1 testnet is at ~8.5M. They are
+   different chains entirely. The 148M counter is the SoDEX Spot
+   sequencer's own block height, visible at
+   `testnet.sodex.com/explorer?blocktype=spot`, where every order
+   place / cancel is recorded as a "transaction" with its own hash.
+5. **The EIP-712 `verifyingContract` is `0x0…0`**, which means the
+   signature is bound to a domain (the string `"spot"` + chain id),
+   not to any on-chain contract. There is no on-chain verifier
+   contract to bind to — the SoDEX server verifies the signature
+   off-chain.
+
+The actual L1 boundary is the bridge that handles deposits and
+withdrawals. We probed it (`apps/web/scripts/sodex-withdraw-probe.mjs`)
+by signing a `transferAsset(type=EVMWithdraw)` request against the
+public `POST /spot/accounts/transfers` endpoint and got
+`"ToAccountID required"` — that endpoint is only for internal
+account-to-account moves on the SoDEX engine, not for L1 withdrawals.
+The real withdraw path lives in the closed-source UI at
+`testnet.sodex.com/portfolio` and is not exposed in the public Go SDK.
+
+**Practical consequences for an agent builder:**
+
+- Vega does not need to budget any L1 gas for trading. The wallet
+  never broadcasts a transaction; it only signs typed data that the
+  SoDEX gateway accepts over HTTPS.
+- "Order on chain" in a SoDEX context means **on the SoDEX Spot
+  sequencer chain**, not on ValueChain L1. The agent's audit trail is
+  in `/accounts/{addr}/orders/history` plus the SoDEX explorer, not
+  in a ValueChain block explorer.
+- Custody of the user's funds while on SoDEX is held by the SoDEX
+  engine. Deposits and withdrawals are the only L1 events; everything
+  else is settled in the sequencer chain. This is the same model as
+  dYdX v3 / Aevo / RabbitX — `agent-friendly` ≠ `every-action-on-L1`.
+
+If those properties are unacceptable for a given strategy, the
+strategy needs to scope its risk to the sequencer's uptime + the
+operator's good behaviour, not to L1 finality.
+
+### Verifying L1 connectivity yourself
+
+Two scripts cover the L1 side independently of any SoDEX trading:
+
+- `apps/web/scripts/sodex-l1-readiness.mjs` — reads the wallet's native
+  SOSO balance, nonce, chain id, and latest block from the configured
+  RPC; estimates whether the wallet can afford a 21k-gas self-transfer.
+  Exits non-zero with a hint if not. No broadcast.
+- `apps/web/scripts/sodex-l1-self-transfer.mjs` — broadcasts a 0-SOSO
+  self-transfer (the minimal possible L1 action). Surfaces the tx hash
+  and explorer URL on success, the revert reason on failure. Use
+  `--dry-run` to call `estimateGas` only.
+
+Both read `SODEX_TESTNET_PRIVATE_KEY` from `apps/web/.env.local`
+(gitignored). On a fresh wallet you will see `balance: 0 SOSO` and
+the self-transfer will refuse to broadcast; that is the expected
+state because **the public testnet faucet only credits vUSDC inside
+the SoDEX engine — it does not drop native SOSO to L1**.
+
+The faucet endpoint (discovered by inspecting the testnet.sodex.com
+JS bundle, not in the public SDK) is:
+
+```
+POST https://testnet.sodex.dev/faucet/api/claim   { address }
+```
+
+No signature required. Rate-limited to one claim per address per day.
+`apps/web/scripts/sodex-faucet-claim.mjs` wraps it: takes the wallet
+address (auto-resolved from `SODEX_TESTNET_PRIVATE_KEY`), POSTs the
+claim, prints the resulting L1 transaction hash, polls for the
+receipt, and reports the engine balance delta. A successful claim
+returns the operator's tx — e.g. our first run produced
+`0x1e3b48ec…cf1` at block `8545071`, gas used 97928, four Transfer /
+Approval log events from the bridge contract — and the SoDEX engine
+balance moved from 1200 to 1300 vUSDC. The next call returns
+`{"code":1,"msg":"Already claimed"}` with HTTP 403.
+
+That confirms the faucet is itself an L1 actor: the operator wallet
+pays gas and sends vUSDC through a bridge contract that credits the
+SoDEX engine. Our wallet appears nowhere on L1 in this flow — it
+just receives an off-chain credit on the engine side. Per SoSoValue
+docs, native SOSO testnet gas is earned through testnet tasks /
+points rather than handed out by a public faucet. Once a wallet
+holds any non-zero SOSO, the self-transfer script confirms the L1
+broadcast path in one command.
 
 ---
 
